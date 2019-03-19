@@ -7,3 +7,5 @@ figure;
 
 plot(atlagszam,y2,"r", "linewidth", 2, "marker",".",erosszam,y,"b", "linewidth", 2, "marker","." );
 axis([0 70 0 100000]);
+legend("Strong perf", "Average perf.", "location", "North");
+title("Comparing a strong performance to a medium");
