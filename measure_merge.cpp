@@ -10,9 +10,9 @@
 *	vektorokat keresve, majd ha a mérés nem hibás, akkor feldolgozza.
 *	A kimenet 2 vektor, amelyet egy R script segítségével ábrázolunk.
 *
-*   build: g++ measure_merge.cpp -o measure_merge -lboost_system
-* -lboost_filesystem
-*   run: ./measure_merge [absolute path](optional)
+*   BUILD: g++ measure_merge.cpp -o measure_merge -lboost_system -lboost_filesystem
+* 
+*   RUN: ./measure_merge [absolute path](optional) [treshold]
 */
 
 #include "boost/filesystem/operations.hpp"
@@ -22,6 +22,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <numeric>
 
 using namespace boost::filesystem;
 using namespace std;
@@ -30,6 +31,7 @@ using namespace std;
 // std::ofstream ofs ("merge.txt", std::ofstream::out);
 
 vector<vector<int>> matrix;
+vector<double> avgBPS;
 
 /*
 * A lost2found és found2lost vektorok merge-elése, egy mátrixba,
@@ -80,7 +82,7 @@ void extractIntegerWords(string str, vector<int>& out) {
 * karakterláncok után,
 * ezeket ignorálja a program.
 */
-void getFileContent(boost::filesystem::path fileName,
+int getFileContent(boost::filesystem::path fileName,
                     vector<int>& l2f,
                     vector<int>& f2l) {
   std::ifstream in(fileName.c_str());
@@ -104,11 +106,18 @@ void getFileContent(boost::filesystem::path fileName,
         extractIntegerWords(str, f2l);
       }
     }
+    if(str.find("U R about ") == 0){
+      avgBPS.push_back(stod(str.substr(10, str.find(" Kilobytes"))));
+    }
   }
-  if (flag)
+  int toReturn = 0;
+  if (flag){
+    toReturn = l2f.size() + f2l.size();
     merge(l2f, f2l);
+  }
 
   in.close();
+  return toReturn;
 }
 /*
 * Visszaadja a paraméterként adott elérési úton lévő fájl
@@ -125,18 +134,22 @@ string getExt(path p) {
 * ha .txt fájl, akkor meghívja a getFileContent(path, vector<int>, vector<int>)
 * függvényt.
 */
-void dirent(path p, vector<int>& l2f, vector<int>& f2l) {
+void dirent(path p, vector<int>& l2f, vector<int>& f2l, int treshold) {
+  int eventCount = 0;
   try {
     if (exists(p)) {
       if (is_regular_file(p)) {
         if (getExt(p) == ".txt" || getExt(p) == ".TXT") {
-          getFileContent(p, l2f, f2l);
+          eventCount = getFileContent(p, l2f, f2l);
+          if (eventCount > treshold ){
+            cout<<"\nMagas eseményszám: "<<p<<endl;
+          }
         }
       }
 
       else if (is_directory(p)) {
         for (directory_entry& x : directory_iterator(p)) {
-          dirent(x.path(), l2f, f2l);
+          dirent(x.path(), l2f, f2l, treshold);
         }
       }
     }
@@ -167,19 +180,48 @@ double avg(vector<vector<int>>& matrix, int column, int& divisor) {
   return sum;
 }
 
+/*
+* Kiszámolja az átlagos bps-t.
+*/
+double countAvgBPS(){
+  double sum_of_elements = 0;
+
+  if(avgBPS.size() == 0){
+  	cout<<"Nincs átlaglolható érték"<<endl;
+  	return 0;
+  }
+  else{
+  sum_of_elements = accumulate(avgBPS.begin(), avgBPS.end(), 0.);
+  return sum_of_elements / avgBPS.size();
+  }
+}
+
 int main(int argc, char* argv[]) {
   path p;
 
-  if (argv[1] != NULL) {
+  if (argc >= 2) {
     p = argv[1];
   } else {
     p = boost::filesystem::current_path();
   }
 
+  /* A második argumentummal megadhatunk egy küszöbértéket, ami a
+  * kiugró eseményszámot tartalmazó méréseket tartalmazza, mert ezek 
+  * valószínűleg hibás mérések (például sokszor felengedte az egérgombot),
+  * de legfőképpen, a grafikon végét ezek az eredmények torzítják.
+  */
+  int treshold = 0;
+  if (argc >= 3) {
+    treshold = stoi(argv[2]);
+  } else {
+    //10 perc alatt a 100 találat-vesztés kiugró érték
+    treshold = 100;
+  }
+
   std::vector<int> l2f;
   std::vector<int> f2l;
 
-  dirent(p, l2f, f2l);
+  dirent(p, l2f, f2l, treshold);
   int maxColumns = 0;
   int divisor = matrix.size();
 
@@ -214,6 +256,28 @@ int main(int argc, char* argv[]) {
     cout << average[i] << ", ";
   }
   cout << "\n";
-
+  cout<<"Az átlagos bps a mért csoportban: "<<countAvgBPS()<<endl;
+  cout<<"Leggyengébb: "<<*min_element(avgBPS.begin(), avgBPS.end())<<"KB"<<endl;
+  cout<<"Legerősebb: "<<*max_element(avgBPS.begin(), avgBPS.end())<<"KB"<<endl;
   return 0;
 }
+/*
+Az R script a program kimenetének feldolgozására:
+
+pdf("udprognum.pdf")
+
+size=c([Ide a div vektor elemei])
+
+plot(size, type="o")
+dev.off()
+
+pdf("udprogmeanFL.pdf")
+
+bps=c([Ide az average vektor elemei])
+names = c("F", "L")
+
+plot(bps, type="o")
+ppp=c(1,3)
+text(bps, names, cex=0.9, font=2, pos=ppp)
+dev.off()
+*/
